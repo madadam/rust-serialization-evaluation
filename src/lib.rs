@@ -3,24 +3,24 @@
 
 #![allow(dead_code)]
 
-#[cfg(feature = "use_cbor")] extern crate cbor;
-#[cfg(feature = "use_cbor")] extern crate rustc_serialize;
+#[cfg(feature = "use_rustc_serialize")] extern crate rustc_serialize;
+#[cfg(feature = "use_serde")] extern crate serde;
 
+#[cfg(feature = "use_cbor")] extern crate cbor;
 #[cfg(feature = "use_bincode")] extern crate bincode;
-#[cfg(feature = "use_bincode")] extern crate serde;
 
 extern crate test;
 
-#[cfg_attr(feature = "use_cbor", derive(RustcDecodable, RustcEncodable))]
-#[cfg_attr(feature = "use_bincode", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "use_rustc_serialize", derive(RustcDecodable, RustcEncodable))]
+#[cfg_attr(feature = "use_serde", derive(Deserialize, Serialize))]
 pub struct Person {
   id:    u64,
   name:  String,
   email: String
 }
 
-#[cfg_attr(feature = "use_cbor", derive(RustcDecodable, RustcEncodable))]
-#[cfg_attr(feature = "use_bincode", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "use_rustc_serialize", derive(RustcDecodable, RustcEncodable))]
+#[cfg_attr(feature = "use_serde", derive(Deserialize, Serialize))]
 pub struct Document {
   id:      u64,
   name:    String,
@@ -48,58 +48,74 @@ fn make_sample_data() -> Document {
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use super::{make_sample_data, Document};
-  use test::Bencher;
+#[cfg(all(feature = "use_rustc_serialize", feature = "use_cbor"))]
+mod code {
+  use rustc_serialize::{Decodable, Encodable};
+  use cbor::{Decoder, Encoder};
 
-  #[cfg(feature = "use_cbor")] use cbor::{Decoder, Encoder};
-  #[cfg(feature = "use_cbor")] use rustc_serialize::{Decodable, Encodable};
-
-  #[cfg(feature = "use_cbor")]
-  fn encode<T: Encodable>(v: T) -> Vec<u8> {
+  pub fn encode<T: Encodable>(v: T) -> Vec<u8> {
     let mut encoder = Encoder::from_memory();
     encoder.encode(&[v]).unwrap();
     encoder.as_bytes().to_vec()
   }
 
-  #[cfg(feature = "use_cbor")]
-  fn decode<T: Decodable>(bytes: &[u8]) -> T {
+  pub fn decode<T: Decodable>(bytes: &[u8]) -> T {
     let mut decoder = Decoder::from_bytes(bytes);
     decoder.decode().next().unwrap().unwrap()
   }
+}
 
-  #[cfg(feature = "use_bincode")] use bincode::serde;
-  #[cfg(feature = "use_bincode")] use bincode::SizeLimit;
-  #[cfg(feature = "use_bincode")] use serde::{Deserialize, Serialize};
+#[cfg(all(feature = "use_serde", feature = "use_bincode"))]
+mod code {
+  use serde::{Deserialize, Serialize};
+  use bincode::SizeLimit;
+  use bincode::serde;
 
-  #[cfg(feature = "use_bincode")]
-  fn encode<T: Serialize>(v: T) -> Vec<u8> {
+  pub fn encode<T: Serialize>(v: T) -> Vec<u8> {
     serde::serialize(&v, SizeLimit::Infinite).unwrap()
   }
 
-  #[cfg(feature = "use_bincode")]
-  fn decode<T: Deserialize>(bytes: &[u8]) -> T {
+  pub fn decode<T: Deserialize>(bytes: &[u8]) -> T {
     serde::deserialize(bytes).unwrap()
   }
+}
+
+#[cfg(all(feature = "use_rustc_serialize", feature = "use_bincode"))]
+mod code {
+  use rustc_serialize::{Decodable, Encodable};
+  use bincode::SizeLimit;
+  use bincode::rustc_serialize;
+
+  pub fn encode<T: Encodable>(v: T) -> Vec<u8> {
+    rustc_serialize::encode(&v, SizeLimit::Infinite).unwrap()
+  }
+
+  pub fn decode<T: Decodable>(bytes: &[u8]) -> T {
+    rustc_serialize::decode(bytes).unwrap()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{code, make_sample_data, Document};
+  use test::Bencher;
 
   #[bench]
   fn bench_serialize(b: &mut Bencher) {
     let doc = make_sample_data();
 
     b.iter(|| {
-      encode(&doc);
+      code::encode(&doc);
     })
   }
 
   #[bench]
   fn bench_deserialize(b: &mut Bencher) {
     let doc = make_sample_data();
-    let bytes = encode(&doc);
+    let bytes = code::encode(&doc);
 
     b.iter(|| {
-      decode::<Document>(&bytes);
+      code::decode::<Document>(&bytes);
     })
   }
 }
-
