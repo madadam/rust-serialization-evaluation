@@ -9,6 +9,7 @@
 #[cfg(feature = "use_cbor")] extern crate cbor;
 #[cfg(feature = "use_bincode")] extern crate bincode;
 
+extern crate rand;
 extern crate test;
 
 #[cfg_attr(feature = "use_rustc_serialize", derive(RustcDecodable, RustcEncodable))]
@@ -24,11 +25,14 @@ pub struct Person {
 pub struct Document {
   id:      u64,
   name:    String,
-  authors: Vec<Person>
+  authors: Vec<Person>,
+  content: String,
 }
 
 #[cfg(test)]
-fn make_sample_data() -> Document {
+fn make_sample_data(size: usize) -> Document {
+  use rand::{thread_rng, Rng};
+
   let alice = Person {
     id: 1,
     name: "Alice".to_owned(),
@@ -44,7 +48,8 @@ fn make_sample_data() -> Document {
   Document {
     id: 829472904,
     name: "stuff.txt".to_owned(),
-    authors: vec![alice, bob]
+    authors: vec![alice, bob],
+    content: thread_rng().gen_ascii_chars().take(size).collect(),
   }
 }
 
@@ -100,22 +105,48 @@ mod tests {
   use super::{code, make_sample_data, Document};
   use test::Bencher;
 
-  #[bench]
-  fn bench_serialize(b: &mut Bencher) {
-    let doc = make_sample_data();
+  #[test]
+  fn sizes() {
+    println!("");
+    println!("Size after serialization:");
+    println!("    small: {} bytes", code::encode(&make_sample_data(0)).len());
+    println!("    big:   {} bytes", code::encode(&make_sample_data(1024 * 1024)).len());
+  }
+
+  fn bench_serialize(b: &mut Bencher, size: usize) {
+    let doc = make_sample_data(size);
 
     b.iter(|| {
       code::encode(&doc);
     })
   }
 
-  #[bench]
-  fn bench_deserialize(b: &mut Bencher) {
-    let doc = make_sample_data();
+  fn bench_deserialize(b: &mut Bencher, size: usize) {
+    let doc = make_sample_data(size);
     let bytes = code::encode(&doc);
 
     b.iter(|| {
       code::decode::<Document>(&bytes);
     })
+  }
+
+  #[bench]
+  fn bench_serialize_small(b: &mut Bencher) {
+    bench_serialize(b, 0);
+  }
+
+  #[bench]
+  fn bench_serialize_big(b: &mut Bencher) {
+    bench_serialize(b, 1024 * 1024);
+  }
+
+  #[bench]
+  fn bench_deserialize_small(b: &mut Bencher) {
+    bench_deserialize(b, 0);
+  }
+
+  #[bench]
+  fn bench_deserialize_big(b: &mut Bencher) {
+    bench_deserialize(b, 1024 * 1024);
   }
 }
