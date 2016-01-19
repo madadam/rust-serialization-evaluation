@@ -4,54 +4,18 @@
 #![allow(dead_code)]
 
 #[cfg(feature = "use_rustc_serialize")] extern crate rustc_serialize;
-#[cfg(feature = "use_serde")] extern crate serde;
+#[cfg(feature = "use_serde")]           extern crate serde;
 
-#[cfg(feature = "use_cbor")] extern crate cbor;
+#[cfg(feature = "use_cbor")]    extern crate cbor;
 #[cfg(feature = "use_bincode")] extern crate bincode;
 
 extern crate rand;
 extern crate test;
 
-#[cfg_attr(feature = "use_rustc_serialize", derive(RustcDecodable, RustcEncodable))]
-#[cfg_attr(feature = "use_serde", derive(Deserialize, Serialize))]
-pub struct Person {
-  id:    u64,
-  name:  String,
-  email: String
-}
+mod types;
 
-#[cfg_attr(feature = "use_rustc_serialize", derive(RustcDecodable, RustcEncodable))]
-#[cfg_attr(feature = "use_serde", derive(Deserialize, Serialize))]
-pub struct Document {
-  id:      u64,
-  name:    String,
-  authors: Vec<Person>,
-  content: String,
-}
-
-#[cfg(test)]
-fn make_sample_data(size: usize) -> Document {
-  use rand::{thread_rng, Rng};
-
-  let alice = Person {
-    id: 1,
-    name: "Alice".to_owned(),
-    email: "alice@example.com".to_owned()
-  };
-
-  let bob = Person {
-    id: 2,
-    name: "Bob".to_owned(),
-    email: "bob@example.com".to_owned()
-  };
-
-  Document {
-    id: 829472904,
-    name: "stuff.txt".to_owned(),
-    authors: vec![alice, bob],
-    content: thread_rng().gen_ascii_chars().take(size).collect(),
-  }
-}
+mod rustc_serialize_traits;
+mod serde_traits;
 
 #[cfg(all(feature = "use_rustc_serialize", feature = "use_cbor"))]
 mod code {
@@ -102,15 +66,25 @@ mod code {
 
 #[cfg(test)]
 mod tests {
-  use super::{code, make_sample_data, Document};
+  use super::code;
+  use types::{Document, make_sample_data};
   use test::Bencher;
 
   #[test]
-  fn sizes() {
+  fn basics() {
+    let small = make_sample_data(0);
+    let big = make_sample_data(1024 * 1024);
+
+    let small_encoded = code::encode(&small);
+    let big_encoded = code::encode(&big);
+
+    assert_eq!(small, code::decode(&small_encoded));
+    assert_eq!(big, code::decode(&big_encoded));
+
     println!("");
     println!("Size after serialization:");
-    println!("    small: {} bytes", code::encode(&make_sample_data(0)).len());
-    println!("    big:   {} bytes", code::encode(&make_sample_data(1024 * 1024)).len());
+    println!("    small: {} bytes", small_encoded.len());
+    println!("    big:   {} bytes", big_encoded.len());
   }
 
   fn bench_serialize(b: &mut Bencher, size: usize) {
