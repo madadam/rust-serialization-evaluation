@@ -3,124 +3,235 @@
 
 #![allow(dead_code)]
 
-#[cfg(feature = "use_rustc_serialize")] extern crate rustc_serialize;
-#[cfg(feature = "use_serde")]           extern crate serde;
-
-#[cfg(feature = "use_cbor")]    extern crate cbor;
-#[cfg(feature = "use_bincode")] extern crate bincode;
-
+extern crate bincode;
+extern crate cbor;
 extern crate rand;
+extern crate rustc_serialize;
+extern crate serde;
+extern crate serde_cbor;
 extern crate test;
-
-mod types;
 
 mod rustc_serialize_traits;
 mod serde_traits;
+mod types;
 
-#[cfg(all(feature = "use_rustc_serialize", feature = "use_cbor"))]
 mod code {
-  use rustc_serialize::{Decodable, Encodable};
-  use cbor::{Decoder, Encoder};
+  pub mod rustc_serialize_cbor {
+    use cbor::{Decoder, Encoder};
+    use types::Document;
 
-  pub fn encode<T: Encodable>(v: T) -> Vec<u8> {
-    let mut encoder = Encoder::from_memory();
-    encoder.encode(&[v]).unwrap();
-    encoder.as_bytes().to_vec()
+    pub fn encode(d: &Document) -> Vec<u8> {
+      let mut encoder = Encoder::from_memory();
+      encoder.encode(&[d]).unwrap();
+      encoder.as_bytes().to_vec()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Document {
+      let mut decoder = Decoder::from_bytes(bytes);
+      decoder.decode().next().unwrap().unwrap()
+    }
   }
 
-  pub fn decode<T: Decodable>(bytes: &[u8]) -> T {
-    let mut decoder = Decoder::from_bytes(bytes);
-    decoder.decode().next().unwrap().unwrap()
-  }
-}
+  pub mod serde_cbor {
+    use serde_cbor::{de, ser};
+    use types::Document;
 
-#[cfg(all(feature = "use_serde", feature = "use_bincode"))]
-mod code {
-  use serde::{Deserialize, Serialize};
-  use bincode::SizeLimit;
-  use bincode::serde;
+    pub fn encode(d: &Document) -> Vec<u8> {
+      ser::to_vec(d).unwrap()
+    }
 
-  pub fn encode<T: Serialize>(v: T) -> Vec<u8> {
-    serde::serialize(&v, SizeLimit::Infinite).unwrap()
+    pub fn decode(bytes: &[u8]) -> Document {
+      de::from_slice(bytes).unwrap()
+    }
   }
 
-  pub fn decode<T: Deserialize>(bytes: &[u8]) -> T {
-    serde::deserialize(bytes).unwrap()
+  pub mod serde_bincode {
+    use bincode::SizeLimit;
+    use bincode::serde;
+    use types::Document;
+
+    pub fn encode(d: &Document) -> Vec<u8> {
+      serde::serialize(d, SizeLimit::Infinite).unwrap()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Document {
+      serde::deserialize(bytes).unwrap()
+    }
   }
-}
 
-#[cfg(all(feature = "use_rustc_serialize", feature = "use_bincode"))]
-mod code {
-  use rustc_serialize::{Decodable, Encodable};
-  use bincode::SizeLimit;
-  use bincode::rustc_serialize;
+  pub mod rustc_serialize_bincode {
+    use bincode::SizeLimit;
+    use bincode::rustc_serialize;
+    use types::Document;
 
-  pub fn encode<T: Encodable>(v: T) -> Vec<u8> {
-    rustc_serialize::encode(&v, SizeLimit::Infinite).unwrap()
-  }
+    pub fn encode(d: &Document) -> Vec<u8> {
+      rustc_serialize::encode(d, SizeLimit::Infinite).unwrap()
+    }
 
-  pub fn decode<T: Decodable>(bytes: &[u8]) -> T {
-    rustc_serialize::decode(bytes).unwrap()
+    pub fn decode(bytes: &[u8]) -> Document {
+      rustc_serialize::decode(bytes).unwrap()
+    }
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::code;
-  use types::{Document, make_sample_data};
-  use test::Bencher;
+    use super::code;
+    use types::{Document, make_sample_data};
+    use test::Bencher;
 
-  #[test]
-  fn basics() {
-    let small = make_sample_data(0);
-    let big = make_sample_data(1024 * 1024);
+    fn compute_size<E, D>(encode: E, decode: D) -> (usize, usize)
+        where E: Fn(&Document) -> Vec<u8>,
+              D: Fn(&[u8]) -> Document
+    {
+        let small = make_sample_data(0);
+        let big = make_sample_data(1024 * 1024);
 
-    let small_encoded = code::encode(&small);
-    let big_encoded = code::encode(&big);
+        let small_encoded = encode(&small);
+        let big_encoded = encode(&big);
 
-    assert_eq!(small, code::decode(&small_encoded));
-    assert_eq!(big, code::decode(&big_encoded));
+        assert_eq!(small, decode(&small_encoded));
+        assert_eq!(big, decode(&big_encoded));
 
-    println!("");
-    println!("Size after serialization:");
-    println!("    small: {} bytes", small_encoded.len());
-    println!("    big:   {} bytes", big_encoded.len());
-  }
+        (small_encoded.len(), big_encoded.len())
+    }
 
-  fn bench_serialize(b: &mut Bencher, size: usize) {
-    let doc = make_sample_data(size);
+    fn print_size(sizes: (usize, usize)) {
+        println!("    small: {}", sizes.0);
+        println!("    big:   {}", sizes.1);
+    }
 
-    b.iter(|| {
-      code::encode(&doc);
-    })
-  }
+    fn bench_serialize<E>(b: &mut Bencher, size: usize, encode: E)
+        where E: Fn(&Document) -> Vec<u8>
+    {
+        let doc = make_sample_data(size);
 
-  fn bench_deserialize(b: &mut Bencher, size: usize) {
-    let doc = make_sample_data(size);
-    let bytes = code::encode(&doc);
+        b.iter(|| {
+            encode(&doc);
+        })
+    }
 
-    b.iter(|| {
-      code::decode::<Document>(&bytes);
-    })
-  }
+    fn bench_deserialize<E, D>(b: &mut Bencher, size: usize, encode: E, decode: D)
+        where E: Fn(&Document) -> Vec<u8>,
+              D: Fn(&[u8]) -> Document
+    {
+        let doc = make_sample_data(size);
+        let bytes = encode(&doc);
 
-  #[bench]
-  fn bench_serialize_small(b: &mut Bencher) {
-    bench_serialize(b, 0);
-  }
+        b.iter(|| {
+            decode(&bytes);
+        })
+    }
 
-  #[bench]
-  fn bench_serialize_big(b: &mut Bencher) {
-    bench_serialize(b, 1024 * 1024);
-  }
+    #[test]
+    fn size() {
+        println!("");
+        println!("rustc_serialize + CBOR");
+        print_size(compute_size(code::rustc_serialize_cbor::encode,
+                                code::rustc_serialize_cbor::decode));
 
-  #[bench]
-  fn bench_deserialize_small(b: &mut Bencher) {
-    bench_deserialize(b, 0);
-  }
+        println!("rustc_serialize + bincode");
+        print_size(compute_size(code::rustc_serialize_bincode::encode,
+                                code::rustc_serialize_bincode::decode));
 
-  #[bench]
-  fn bench_deserialize_big(b: &mut Bencher) {
-    bench_deserialize(b, 1024 * 1024);
-  }
+        println!("serde + CBOR");
+        print_size(compute_size(code::serde_cbor::encode,
+                                code::serde_cbor::decode));
+
+        println!("serde + bincode");
+        print_size(compute_size(code::serde_bincode::encode,
+                                code::serde_bincode::decode));
+
+    }
+
+    #[bench]
+    fn bench_serialize_small_rustc_serialize_cbor(b: &mut Bencher) {
+        bench_serialize(b, 0, code::rustc_serialize_cbor::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_small_rustc_serialize_bincode(b: &mut Bencher) {
+        bench_serialize(b, 0, code::rustc_serialize_bincode::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_small_serde_cbor(b: &mut Bencher) {
+        bench_serialize(b, 0, code::serde_cbor::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_small_serde_bincode(b: &mut Bencher) {
+        bench_serialize(b, 0, code::serde_bincode::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_big_rustc_serialize_cbor(b: &mut Bencher) {
+        bench_serialize(b, 1024 * 1024, code::rustc_serialize_cbor::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_big_rustc_serialize_bincode(b: &mut Bencher) {
+        bench_serialize(b, 1024 * 1024, code::rustc_serialize_bincode::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_big_serde_cbor(b: &mut Bencher) {
+        bench_serialize(b, 1024 * 1024, code::serde_cbor::encode);
+    }
+
+    #[bench]
+    fn bench_serialize_big_serde_bincode(b: &mut Bencher) {
+        bench_serialize(b, 1024 * 1024, code::serde_bincode::encode);
+    }
+
+
+
+
+    #[bench]
+    fn bench_deserialize_small_rustc_serialize_cbor(b: &mut Bencher) {
+        bench_deserialize(b, 0, code::rustc_serialize_cbor::encode,
+                                code::rustc_serialize_cbor::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_small_rustc_serialize_bincode(b: &mut Bencher) {
+        bench_deserialize(b, 0, code::rustc_serialize_bincode::encode,
+                                code::rustc_serialize_bincode::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_small_serde_cbor(b: &mut Bencher) {
+        bench_deserialize(b, 0, code::serde_cbor::encode,
+                                code::serde_cbor::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_small_serde_bincode(b: &mut Bencher) {
+        bench_deserialize(b, 0, code::serde_bincode::encode,
+                                code::serde_bincode::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_big_rustc_serialize_cbor(b: &mut Bencher) {
+        bench_deserialize(b, 1024 * 1024, code::rustc_serialize_cbor::encode,
+                                          code::rustc_serialize_cbor::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_big_rustc_serialize_bincode(b: &mut Bencher) {
+        bench_deserialize(b, 1024 * 1024, code::rustc_serialize_bincode::encode,
+                                          code::rustc_serialize_bincode::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_big_serde_cbor(b: &mut Bencher) {
+        bench_deserialize(b, 1024 * 1024, code::serde_cbor::encode,
+                                          code::serde_cbor::decode);
+    }
+
+    #[bench]
+    fn bench_deserialize_big_serde_bincode(b: &mut Bencher) {
+        bench_deserialize(b, 1024 * 1024, code::serde_bincode::encode,
+                                          code::serde_bincode::decode);
+    }
 }

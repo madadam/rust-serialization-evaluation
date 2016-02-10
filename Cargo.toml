@@ -8,13 +8,10 @@ bincode = "~0.4.0"
 cbor = "~0.3.16"
 rand = "~0.3.13"
 rustc-serialize = "~0.3.16"
-serde = "~0.6.7"
+serde = "~0.6.11"
 serde_macros = "~0.6.5"
-serde_json = "*"
+serde_cbor = "~0.2.0"
 
 [features]
-use_rustc_serialize = []
-use_serde = []
-use_cbor = []
-use_bincode = []
 explicit_traits = []
+binary_data = []
